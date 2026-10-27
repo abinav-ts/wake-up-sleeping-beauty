@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # One-shot deploy using your normal `wrangler login` session (no API token needed).
+# No secrets to manage: each device generates its own private ID on first launch.
 set -euo pipefail
 cd "$(dirname "$0")"
 DB_NAME="wake-up-sleeping-beauty"
@@ -25,14 +26,7 @@ fi
 DEPLOY_OUT="$(npx wrangler deploy 2>&1 | tee /dev/stderr)"
 URL="$(printf '%s' "$DEPLOY_OUT" | grep -Eo 'https://[A-Za-z0-9.-]+\.workers\.dev' | head -1 || true)"
 
-# Secret token for the app (kept if you already set one).
-if [ ! -f .token ]; then
-  openssl rand -hex 24 > .token
-  chmod 600 .token
-fi
-printf '%s' "$(cat .token)" | npx wrangler secret put TOKEN
-
 echo
 echo "Deployed: ${URL:-<see wrangler output above>}"
-echo "Your token (paste it into the app on first launch): $(cat .token)"
-echo "Steps webhook: ${URL:-<url>}/api/steps?t=$(cat .token)"
+echo "Open it on your phone, Add to Home Screen, and you're in. Nothing to paste."
+echo "Steps webhook: use the 'Copy steps webhook' button in the app."

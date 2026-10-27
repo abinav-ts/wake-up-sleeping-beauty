@@ -84,12 +84,6 @@
     <p class="digital" id="digital"></p>
   </header>
 
-  <section class="card hidden" id="login">
-    <h2>Unlock</h2>
-    <p class="muted">Paste your secret token (shown when you deployed). It's stored on this device only.</p>
-    <div class="row"><input id="tokenInput" type="password" placeholder="Token" autocomplete="off"><button id="tokenBtn" style="flex:0">Go</button></div>
-    <p class="err" id="loginErr"></p>
-  </section>
 
   <section class="card ring hidden" id="ring">
     <h2>Ringing</h2>
@@ -124,7 +118,14 @@
         <button id="notifBtn">Enable alarm notifications</button>
         <button class="ghost" id="testBtn">Send test</button>
       </div>
-      <p class="muted" style="margin-top:12px">Steps webhook for the Shortcut:<br><code id="hook"></code></p>
+    </section>
+
+    <section class="card">
+      <h2>This device</h2>
+      <p class="muted">Your alarms are tied to a private ID kept in this app, so there is nothing to sign in to. Clearing Safari or app data loses it, so copy it somewhere safe. To move to a new phone, paste it below.</p>
+      <div class="row"><button class="ghost" id="copyId">Copy my ID</button><button class="ghost" id="copyHook">Copy steps webhook</button></div>
+      <div class="row" style="margin-top:10px"><input id="restoreInput" placeholder="Paste an ID to restore" autocomplete="off" autocapitalize="off" spellcheck="false"><button id="restoreBtn" style="flex:0">Restore</button></div>
+      <p class="muted" id="idMsg" style="word-break:break-all"></p>
     </section>
   </div>
 </main>

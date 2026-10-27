@@ -31,17 +31,17 @@ ul{padding-left:20px}li{margin:.3em 0}.top{font-size:14px;margin-bottom:14px;dis
 <tr><td>Backend</td><td>Cloudflare Worker (JS)</td><td>Serverless, free tier, supports a <b>cron every minute</b></td></tr>
 <tr><td>Storage</td><td>Cloudflare D1 (SQLite)</td><td>Tiny relational state: alarms, chaos state, push subscriptions</td></tr>
 <tr><td>Health data</td><td>iOS Shortcuts automation, calling the Worker's <code>/api/steps</code></td><td>HealthKit has no web API, so a native Shortcut reads steps and pushes them to us</td></tr>
-<tr><td>Auth</td><td>One secret token (single user)</td><td>Simplest thing that keeps strangers out</td></tr>
-<tr><td>Tests</td><td><code>node:test</code>, with <code>node:sqlite</code> standing in for D1</td><td>Runs the real Worker code offline: 10 tests</td></tr>
+<tr><td>Identity</td><td>Random per-device ID (128-bit), no login</td><td>Multi-user with zero signup friction; the unguessable ID is the key to a person's data</td></tr>
+<tr><td>Tests</td><td><code>node:test</code>, with <code>node:sqlite</code> standing in for D1</td><td>Runs the real Worker code offline: 17 tests, including user isolation</td></tr>
 </table>
 
 <h2>Architecture</h2>
-<pre>iPhone PWA  ──(token)──►  Worker /api/*  ◄──►  D1 (alarms, chaos, subs)
+<pre>iPhone PWA  ──(X-Device-Id)──►  Worker /api/*  ◄──►  D1 (alarms, chaos, subs)
     ▲                          ▲   │
     │ push notification        │   └── cron (every minute): start due alarms,
     │                          │        send a push every ~30 s until Stop/Snooze
 Apple push service ◄───────────┘
-iOS Shortcut (Health steps) ──► POST /api/steps</pre>
+iOS Shortcut (Health steps) ──► POST /api/steps?u=&lt;id&gt;</pre>
 <p>The Worker is the only place the real fire time exists. <code>/api/state</code> never selects it, so the client cannot show or leak it (there is a test for that).</p>
 
 <h2>The chaos logic</h2>
@@ -58,6 +58,14 @@ Generated with Box–Muller from the browser-grade crypto RNG. The <code>now + 1
 </div>
 <p><b>Worked example.</b> Let an alarm ring 12 minutes: x = 12 − 3 = 9, σ = 135 min. Then P(moved by more than 30 min) ≈ 82%, more than 2 hours ≈ 37%, more than 6 hours ≈ 0.8%. A 1-minute reaction after the grace gives x = 0, so no shift at all.</p>
 
+<h2>Identity and multi-user design</h2>
+<div class="card">
+<b>No login, one key.</b> On first launch each browser generates a random 128-bit ID and stores it locally. Every request carries it as <code>X-Device-Id</code>, and every table (<code>alarms</code>, <code>chaos_v2</code>, <code>subs</code>) is keyed by it, so users never see or affect each other's data. Guessing a valid ID is infeasible (2<sup>128</sup> possibilities).
+<br><br><b>Fair play at scale.</b> The cron job handles everyone's alarms in one pass, and pushes go only to the owner's devices. Because signup is free, there are guard rails: 20 new devices per IP per hour (IPs stored only as a truncated hash), 2000 users, 25 open alarms each, alarms at most a year out, and users unseen for 90 days are purged.
+<br><br><b>Recovery.</b> The ID lives in the app's storage, so clearing it loses the alarms. The app can copy the ID and restore it on a new phone.
+<br><br><b>Migration.</b> The earlier single-token version's data is moved to the owner's new ID the first time their old browser presents the old token; after that the token can be deleted.
+</div>
+
 <h2>Design decisions and trade-offs</h2>
 <ul>
 <li><b>We own the alarms.</b> iOS gives apps no access to the Clock app's alarms, so alarms are created in this app.</li>
@@ -73,11 +81,14 @@ Generated with Box–Muller from the browser-grade crypto RNG. The <code>now + 1
 <li>Push delivery on iOS can be delayed, and Silent mode or Focus will mute it. Keep a real backup alarm.</li>
 <li>Steps arrive when the Shortcut runs (e.g. every few hours), so a goal reached between runs may be noticed late. The number is sent by a Shortcut, so the check is honest-system, not tamper-proof.</li>
 <li>Setting a backup alarm earlier than T1 + 24h is unaffected by design.</li>
-<li>Single user, and the token lives in the URL for the steps webhook. Rotate it if it leaks.</li>
+<li>The device ID is the only key: anyone who gets it (it's inside the steps webhook URL) can act as that user, and clearing site data loses it. There's no recovery beyond the saved ID.</li>
+<li>Abuse resistance is basic (per-IP signup limit, caps). A hostile crowd could still fill the 2000-user quota. It's a project, not a hardened service.</li>
+<li>A cron run does a few database queries per ringing user, so very large numbers of simultaneous alarms would hit Cloudflare's free-tier limits.</li>
 <li>The deployed code was tested offline. Push on a real iPhone is the part exercised only in live use.</li>
 </ul>
 
 <h2>Likely viva questions</h2>
+<details><summary>Alarms aren't common to everyone. How does the app keep users separate without a login?</summary><p>Each browser generates a random 128-bit ID and sends it with every request. All data is stored against that ID, so users can't see or change each other's alarms. It trades password-style accounts for zero friction: the ID is the credential, and losing it means losing the data, which is why the app offers copy and restore.</p></details>
 <details><summary>Why can't the app just read the Clock app's alarms?</summary><p>iOS does not expose Clock alarms to third-party apps. There is no API to read, edit or observe them, so the app schedules and rings its own alarms.</p></details>
 <details><summary>Why use a Shortcut for steps instead of HealthKit directly?</summary><p>HealthKit is native-only (Swift/Objective-C). A web app cannot call it. Shortcuts can read Health data and make an HTTP request, which gives the server a step count without writing a native app.</p></details>
 <details><summary>How is the shifted time hidden from the user?</summary><p>It is computed and stored only in the Worker's database. The state API selects only the intended time and status, so the browser never receives the shifted time. A unit test asserts the response contains no fire time.</p></details>
@@ -85,5 +96,5 @@ Generated with Box–Muller from the browser-grade crypto RNG. The <code>now + 1
 <details><summary>What does the 3-minute grace do?</summary><p>It subtracts the first 3 minutes of ringing from x, so a normal human reaction time causes no shift. Only time beyond that counts.</p></details>
 <details><summary>What happens if I never respond to the alarm?</summary><p>After 30 minutes it auto-stops, x is capped at 27 (σ = 405 min), and a new 24h clock starts from when it began ringing.</p></details>
 <details><summary>How does the alarm ring if the app is closed?</summary><p>A Cloudflare cron runs every minute, starts any due alarm and sends Web Push notifications every ~30 seconds until you open the app and press Stop or Snooze.</p></details>
-<details><summary>What would you improve next?</summary><p>A native iOS app with AlarmKit and HealthKit would give true ringing and live steps; a signed Shortcut link for one-tap setup; and per-device auth instead of a shared token.</p></details>
+<details><summary>What would you improve next?</summary><p>A native iOS app with AlarmKit and HealthKit would give true ringing and live steps; a signed Shortcut link for one-tap setup; and real accounts (Sign in with Apple) so alarms survive clearing storage and work across devices.</p></details>
 </main></body></html>

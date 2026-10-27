@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Creates the GitHub repo, pushes, and turns on GitHub Pages (from /docs). Needs `gh auth login` once.
+# Creates the GitHub repo (first run) or commits + pushes updates, and turns on GitHub Pages (from /docs).
+# Usage: ./publish.sh ["commit message"]   Needs `gh auth login` once.
 set -euo pipefail
 cd "$(dirname "$0")"
 REPO="wake-up-sleeping-beauty"
@@ -16,7 +17,7 @@ fi
 
 git add -A
 if ! git diff --cached --quiet; then
-  git commit -q -m "Wake Up, Sleeping Beauty: chaos alarm PWA on Cloudflare Workers
+  git commit -q -m "${1:-Update project}
 
 Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
 Claude-Session: https://claude.ai/code/session_017DpXg7mQSSyLTo8y8pzXRi"

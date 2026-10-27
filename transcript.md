@@ -524,3 +524,188 @@ Clean up the transcript, scrubbing for personal details
 I'll start by searching the transcript and every other committed file for anything personal.
 
 *[Bash: Scan project files for personal identifiers]*
+
+*[Bash: Make redaction generic, rebuild transcript, rescan for personal details]*
+
+I rebuilt the transcript and rescanned every file that would be committed. Nothing personal remains in it. The transcript now has 13 turns, because this cleanup request is Turn 13.
+
+**What the scrub changed**
+- **Cloudflare account subdomain:** it contained your name and appeared 9 times. URLs now read `wake-up-sleeping-beauty.[account].workers.dev`.
+- **App token:** all 3 occurrences are now `[REDACTED-TOKEN]`.
+- **Cloudflare IDs:** the database ID and deployment version IDs are now `[uuid]`.
+- **Also covered:** your email, home-folder paths, bare username and Claude session URLs are replaced if they appear. None showed up beyond what's listed above, apart from `noreply@anthropic.com`, which I kept as ordinary attribution.
+
+**A mistake in my earlier work.** My first `scripts/build_transcript.py` had your email address and username written into its redaction rules. That would have put them in the public repo's source. I rewrote it so no personal string lives in the code. It reads your home directory, username and token from the machine at run time, and matches emails, account subdomains, IDs and paths by pattern.
+
+**Left as is**
+- **`wrangler.toml`:** it still holds your real D1 database ID. It's an identifier, not a credential, but I can swap in a placeholder if you want the repo fully generic.
+- **Commit message:** the commit in `publish.sh` carries the `Claude-Session` link, which is the attribution format for this session. It ties the public repo to your private Claude session. I can drop that line if you'd rather not.
+
+Nothing has been published yet. Run `./publish.sh` when you're ready.
+
+## Turn 14  (27 Oct 2026, 08:51 UTC)
+
+**User:**
+
+! ./pu
+
+**Claude:**
+
+That command was cut off. It ran `./pu` instead of `./publish.sh`, so nothing happened. Run it in full:
+
+```
+! ./publish.sh
+```
+
+If it asks you to log in to GitHub, follow the prompts. If anything fails, paste the output here.
+
+## Turn 15  (27 Oct 2026, 08:51 UTC)
+
+**User:**
+
+! ./publish.sh
+
+**Shell output:**
+
+```
+Initialized empty Git repository in ~/Projects/Wake-Up-Sleeping-Beauty/.git/
+https://github.com/[github-user]/wake-up-sleeping-beauty
+To https://github.com/[github-user]/wake-up-sleeping-beauty.git
+ * [new branch]      HEAD -&gt; main
+branch 'main' set up to track 'origin/main'.
+
+Repo:  https://github.com/[github-user]/wake-up-sleeping-beauty
+Pages: https://[github-user].github.io/wake-up-sleeping-beauty/
+Pages can take a minute or two to go live.
+```
+
+**Claude:**
+
+It's pushed. I'll check whether the Pages site is up.
+
+*[Bash: Check the three GitHub Pages URLs respond]*
+
+The repo is live, but the Pages site isn't up yet. All three URLs returned 404.
+
+- **Repo:** https://github.com/[github-user]/wake-up-sleeping-beauty
+- **Pages (once built):** https://[github-user].github.io/wake-up-sleeping-beauty/
+
+**The 404s**
+- **Timing:** the first Pages build usually takes 1–3 minutes, so wait and reload `/viva.html` and `/transcript.html`.
+- **Pages setting:** if they still 404 after five minutes, the script's Pages step may have failed silently, since it ignores errors. Check Settings → Pages and set Source to "Deploy from a branch", branch `main`, folder `/docs`.
+- **Retry:** you can also run `! gh api repos/[github-user]/wake-up-sleeping-beauty/pages --jq .status` to see the build state. Tell me what it says and I'll help.
+
+**The transcript on GitHub** stops at the cleanup turn, so it doesn't include the last few messages about publishing. To refresh it, rerun `python3 scripts/build_transcript.py <session.jsonl>`, then commit and push. I can prepare that, but the push needs your terminal. The final message of the latest turn will always be missing, because it's written after the export.
+
+## Turn 16  (27 Oct 2026, 08:59 UTC)
+
+**User:**
+
+Give me the main link once again
+
+**Claude:**
+
+Main link (the Pages site, with the viva sheet and transcript):
+https://[github-user].github.io/wake-up-sleeping-beauty/
+
+It returned 404 when I checked a moment ago, so if it still isn't loading, give it a few more minutes.
+
+The GitHub repo is at https://github.com/[github-user]/wake-up-sleeping-beauty.
+
+The alarm app itself is at https://wake-up-sleeping-beauty.[account].workers.dev. I scrubbed your Cloudflare account subdomain from the transcript, so you'll need to fill that in yourself. It's the URL `./deploy.sh` printed earlier.
+
+## Turn 17  (27 Oct 2026, 09:01 UTC)
+
+**User:**
+
+The token?
+
+**Claude:**
+
+*[Bash: Show the saved app token]*
+
+*[Read: ~/Projects/Wake-Up-Sleeping-Beauty/.token]*
+
+Your app token is:
+
+```
+[REDACTED-TOKEN]
+```
+
+It's also saved in `.token` in the project folder. That file is gitignored, and I redacted the token from the published transcript.
+
+The token has appeared in plain text in this chat, so rotate it before you rely on the app. Delete `.token` and run `./deploy.sh` again, which generates and uploads a new one. The first launch on your phone will then ask for the new token.
+
+## Turn 18  (27 Oct 2026, 13:33 UTC)
+
+**User:**
+
+Can we remove the key?
+
+**Claude:**
+
+*[AskUserQuestion]*
+
+## Turn 19  (27 Oct 2026, 13:34 UTC)
+
+**User:**
+
+But alarms aren't common to everyone right?
+
+**Claude:**
+
+Right, and that's the catch. As built, alarms are **global**: one shared database, no concept of a user. The token was the only thing keeping it single-user. If I just delete the auth, everyone who opens the URL shares your alarm list, can delete your alarms, and can post fake step counts to cancel your chaos. That's why "remove the token" and "alarms belong to each person" are really one change.
+
+**Proposal: per-device identity with no login**
+- On first launch, each browser generates a random 128-bit ID and keeps it locally. There's no token screen to paste into.
+- Every alarm, chaos state, step count and push subscription is stored against that ID. People can't see or affect each other's data, because the ID can't be guessed.
+- The cron job processes everyone's alarms and pushes only to each person's own devices.
+- The steps Shortcut needs to know who you are, so the app shows each user their own webhook URL (with their ID in it) to paste into the Shortcut.
+
+**Trade-offs**
+- The ID is effectively the key. It's just invisible, and if someone clears Safari data they lose their alarms.
+- With no signup at all, anyone could create unlimited users, so I'd add basic rate limits.
+- Your current data stays under a legacy ID that I'd attach to your device, so you wouldn't lose your alarms.
+- It's a schema change plus a redeploy from your terminal (`./deploy.sh` or `npx wrangler deploy`). The old token would stop mattering, which also fixes the token-in-chat issue.
+
+An alternative is real sign-in (Apple or email). It's more robust, but too heavy for this project.
+
+Want me to build the per-device-ID version? If so, I'll make the changes, update the tests and the viva sheet, and rebuild the transcript.
+
+## Turn 20  (27 Oct 2026, 13:35 UTC)
+
+**User:**
+
+Yes, build the per-device-ID version, but push only when the identity is completely built locally
+
+**Claude:**
+
+I'll build it fully locally first. Nothing gets pushed until the identity system is complete and tested. I'm reading the current client code so I can rework it precisely.
+
+*[Read: ~/Projects/Wake-Up-Sleeping-Beauty/public/app.js]*
+
+*[Write: ~/Projects/Wake-Up-Sleeping-Beauty/src/index.js]*
+
+*[Read: ~/Projects/Wake-Up-Sleeping-Beauty/src/index.js]*
+
+*[Write: ~/Projects/Wake-Up-Sleeping-Beauty/src/index.js]*
+
+*[Bash: Rework client for per-device ID, remove token login]*
+
+Now the tests. I'm rewriting the Worker test file for the multi-user model and adding isolation, rate-limit and legacy-migration coverage:
+
+*[Write: ~/Projects/Wake-Up-Sleeping-Beauty/test/worker.test.js]*
+
+*[Bash: Syntax-check client and run the full test suite]*
+
+That failure is a bug in my test helper, not the app. The alarm's own `status: 'scheduled'` field was overwriting the HTTP status in the result. Fixing the helper's merge order:
+
+*[Bash: Fix test helper merge order and rerun tests]*
+
+All 17 tests pass. Now the deploy script, README and viva sheet need to reflect the new identity model.
+
+*[Bash: Update deploy script, README and viva sheet for per-device identity]*
+
+Everything is built and tested locally. I'm rebuilding the transcript, running the personal-details scan, and committing locally.
+
+*[Bash: Rebuild transcript, rescan for personal details, check git state]*

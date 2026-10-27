@@ -7,7 +7,7 @@ Usage: python3 scripts/build_transcript.py <session.jsonl> [out_dir=docs]
 * Everything Claude did until the next turn (text + one-line tool summaries) goes in a collapsed block.
 * System noise (reminders, task notifications, tool results) is dropped. Secrets are redacted.
 """
-import html, json, re, sys
+import html, json, re, subprocess, sys
 from datetime import datetime
 from pathlib import Path
 
@@ -16,6 +16,19 @@ ROOT = Path(__file__).resolve().parent.parent
 # username come from the machine running the script, the app token from the local .token file.
 HOME = Path.home()
 RULES = []  # (compiled regex, replacement string or function)
+
+
+def _github_owner():
+    try:
+        url = subprocess.run(['git', 'config', '--get', 'remote.origin.url'], cwd=ROOT, capture_output=True, text=True).stdout
+        m = re.search(r'github\.com[:/]([^/\s]+)/', url)
+        return m.group(1) if m else None
+    except Exception:
+        return None
+
+
+_owner = _github_owner()
+GITHUB_RULES = [(re.compile(r'(?<![\w-])' + re.escape(_owner) + r'(?![\w-])'), '[github-user]')] if _owner else []
 tok = ROOT / '.token'
 if tok.exists() and tok.read_text().strip():
     RULES.append((re.compile(re.escape(tok.read_text().strip())), '[REDACTED-TOKEN]'))
@@ -25,6 +38,7 @@ RULES += [
     (re.compile(r'(?<![\w-])' + re.escape(HOME.name) + r'(?![\w-])'), '[user]'),  # bare username
     (re.compile(r'[\w.+-]+@[\w-]+(?:\.[\w-]+)+'), lambda m: m.group(0) if m.group(0).endswith('@anthropic.com') else '[email]'),
     (re.compile(r'(?<=\.)[a-z0-9-]+(?=\.workers\.dev)'), '[account]'),  # <app>.<account>.workers.dev
+    *GITHUB_RULES,
     (re.compile(r'\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b'), '[uuid]'),  # db / version / org ids
     (re.compile(r'session_[A-Za-z0-9]{10,}'), 'session_[id]'),
 ]

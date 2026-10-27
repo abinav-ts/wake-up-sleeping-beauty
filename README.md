@@ -7,6 +7,12 @@ the ring and the shifted alarm firing. The shifted time lives only on the server
 
 Stack: Cloudflare Worker + D1 + cron (every minute) + Web Push (VAPID), static PWA in `public/`.
 
+**Identity:** there is no login. Each browser generates a random 128-bit ID on first launch and sends it as
+`X-Device-Id`; every alarm, chaos state, step count and push subscription is keyed to it, so many people can
+use one deployment without seeing each other. The ID is effectively the key (copy or restore it from the
+app's *This device* card). Guard rails: 20 new devices per IP per hour, 2000 users, 25 open alarms each,
+users inactive for 90 days are deleted.
+
 ## Rules as implemented
 - Alarm rings -> `x` = minutes from first ring to final Stop (snoozes included, auto-stop at 30 min), minus a 3 minute reaction-time grace (floor 0).
 - That ring starts the chaos clock at its actual ring time `T1`.
@@ -17,29 +23,33 @@ Stack: Cloudflare Worker + D1 + cron (every minute) + Web Push (VAPID), static P
 
 ## Deploy
 ```sh
-npm install
-npx wrangler login                      # or export CLOUDFLARE_API_TOKEN
-npx wrangler d1 create wake-up-sleeping-beauty   # paste the database_id into wrangler.toml
-npx wrangler deploy
-openssl rand -hex 24 | tee /dev/stderr | npx wrangler secret put TOKEN   # your secret token
+./deploy.sh        # wrangler login (if needed) -> create D1 -> deploy. No token or secret to set.
 ```
-Tables are created automatically on first request. Open the `workers.dev` URL on the iPhone in **Safari**,
-Share -> **Add to Home Screen**, open it from the Home Screen, paste the token, tap
-**Enable alarm notifications**, then **Send test**.
+Open the `workers.dev` URL on the iPhone in **Safari**, Share -> **Add to Home Screen**, open it from the Home
+Screen, tap **Enable alarm notifications**, then **Send test**.
+
+### Upgrading from the old single-token version
+Data from the token era is kept under an empty owner until a device claims it. The first launch of the new
+app on a phone that still has the old token (saved in its storage) presents it once and the alarms, push
+subscription and step progress move to that device's new ID. Afterwards remove the old secret:
+```sh
+npx wrangler secret delete TOKEN && rm -f .token
+```
 
 ## Steps via iOS Shortcuts
-Health data can't be read from the web, so a Shortcut pushes it. Create a Shortcut:
-1. **Get Contents of URL** `https://<your-worker>.workers.dev/api/steps/since?t=<TOKEN>` -> **Get Dictionary Value** `since_iso`.
+Health data can't be read from the web, so a Shortcut pushes it. Tap **Copy steps webhook** in the app to get
+your URL (it contains your ID, so keep it private). Create a Shortcut:
+1. **Get Contents of URL** `https://<your-worker>.workers.dev/api/steps/since?u=<YOUR-ID>` -> **Get Dictionary Value** `since_iso`.
 2. **Get Dates from Input** (the ISO string) -> **Find Health Samples** where *Type is Steps* and *Start Date is after* that date.
 3. **Calculate Statistics** (Sum) over the samples.
-4. **Get Contents of URL** `https://<your-worker>.workers.dev/api/steps?t=<TOKEN>`, Method **POST**,
+4. **Get Contents of URL** `https://<your-worker>.workers.dev/api/steps?u=<YOUR-ID>`, Method **POST**,
    Request Body **JSON**, field `steps` = the sum (as a Number).
 
 Then Shortcuts -> Automation -> Time of Day, a few times a day (e.g. every 2-3h), *Run Immediately*.
 A goal reached between automation runs is only noticed on the next run.
 
 ## Dev
-`npm test` runs the logic and worker-lifecycle tests (in-memory SQLite standing in for D1).
+`npm test` runs the logic, identity-isolation and worker-lifecycle tests (in-memory SQLite standing in for D1).
 
 ## Docs (GitHub Pages, served from `docs/`)
 - `docs/viva.html`: stack, architecture and the logic behind the chaos

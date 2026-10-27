@@ -5,7 +5,13 @@ const store = {
   set: (k, v) => { try { localStorage.setItem(k, v); } catch {} },
   del: (k) => { try { localStorage.removeItem(k); } catch {} },
 };
-let token = store.get('token');
+// Identity: a random 128-bit id generated on first launch is the only "login". The server keys
+// every alarm to it. Losing it (clearing site data) loses the alarms, so the UI lets you copy/restore it.
+const newId = () => Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, '0')).join('');
+const ID_RE = /^[0-9a-f]{32}$/;
+let uid = store.get('uid');
+if (!ID_RE.test(uid || '')) { uid = newId(); store.set('uid', uid); }
+const idPersisted = store.get('uid') === uid;
 let state = null;
 let skew = 0; // server clock minus local clock
 
@@ -22,27 +28,17 @@ const fmtDay = (ms) => {
 async function api(path, opts = {}) {
   const res = await fetch(path, {
     ...opts,
-    headers: { 'content-type': 'application/json', authorization: `Bearer ${token}`, ...(opts.headers || {}) },
+    headers: { 'content-type': 'application/json', 'x-device-id': uid, ...(opts.headers || {}) },
   });
-  if (res.status === 401) { showLogin('That token was rejected.'); throw new Error('unauthorized'); }
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
   return body;
-}
-
-function showLogin(msg = '') {
-  token = null; store.del('token');
-  $('login').classList.remove('hidden');
-  $('app').classList.add('hidden');
-  $('ring').classList.add('hidden');
-  $('loginErr').textContent = msg;
 }
 
 // ---------- rendering ----------
 
 function render() {
   if (!state) return;
-  $('login').classList.add('hidden');
   $('app').classList.remove('hidden');
 
   const ringing = state.alarms.some((a) => a.status === 'ringing');
@@ -81,17 +77,29 @@ function render() {
          <div class="bar"><i style="width:${pct}%"></i></div><p class="muted">${when} Last alarm counted ${c.x_min.toFixed(1)} min (after a 3 min grace).</p>`;
   }
 
-  $('hook').textContent = `${location.origin}/api/steps?t=…`;
+  $('idMsg').textContent = idPersisted ? '' : 'Warning: this browser would not save the ID, so it will change on reload. Use a normal (non-private) window.';
   updateNotifUi();
 }
 
 async function refresh() {
-  if (!token) return;
   try {
     state = await api('/api/state');
     skew = state.now - Date.now();
     render();
-  } catch (e) { /* login shown on 401; ignore transient network errors */ }
+  } catch (e) {
+    if (!state) { $('app').classList.remove('hidden'); $('addErr').textContent = e.message; }
+  }
+}
+
+// Data created before per-device ids was keyed to a single shared token. If this browser still has
+// that token, present it once so the server re-keys the old alarms to this device's id, then forget it.
+async function claimLegacy() {
+  const old = store.get('token');
+  if (!old) return;
+  try {
+    await api('/api/claim', { method: 'POST', body: JSON.stringify({ token: old }) });
+  } catch { /* nothing to claim (already moved, or the token secret was removed) */ }
+  store.del('token');
 }
 
 // ---------- in-page beeping while an alarm is ringing ----------
@@ -209,12 +217,6 @@ function defaultWhen() {
   return d.toISOString().slice(0, 16);
 }
 
-$('tokenBtn').onclick = () => {
-  token = $('tokenInput').value.trim();
-  if (!token) return;
-  store.set('token', token);
-  refresh();
-};
 $('addBtn').onclick = async () => {
   $('addErr').textContent = '';
   const v = $('when').value;
@@ -233,8 +235,18 @@ $('testBtn').onclick = async () => {
     $('notifMsg').textContent = r.delivered ? `Sent to ${r.delivered} device(s).` : 'No subscribed device accepted the push.';
   } catch (e) { $('notifMsg').textContent = e.message; }
 };
-$('hook').onclick = () => {
-  if (token && navigator.clipboard) navigator.clipboard.writeText(`${location.origin}/api/steps?t=${token}`).then(() => { $('hook').textContent = 'Copied (with your token).'; });
+const copy = (text, msg) =>
+  (navigator.clipboard ? navigator.clipboard.writeText(text) : Promise.reject()).then(
+    () => { $('idMsg').textContent = msg; },
+    () => { $('idMsg').textContent = text; }, // clipboard blocked: show it so it can be copied by hand
+  );
+$('copyId').onclick = () => copy(uid, 'Your ID is copied. Keep it somewhere safe.');
+$('copyHook').onclick = () => copy(`${location.origin}/api/steps?u=${uid}`, 'Steps webhook copied (it contains your ID, so keep it private).');
+$('restoreBtn').onclick = () => {
+  const v = $('restoreInput').value.trim().toLowerCase();
+  if (!ID_RE.test(v)) { $('idMsg').textContent = 'That is not a valid ID (32 characters, 0-9 and a-f).'; return; }
+  store.set('uid', v);
+  location.reload();
 };
 
 $('when').value = defaultWhen();
@@ -245,4 +257,4 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden) refr
 setInterval(refresh, 5000);
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
 
-if (token) refresh(); else showLogin();
+claimLegacy().finally(refresh);
