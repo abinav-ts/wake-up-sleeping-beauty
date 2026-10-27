@@ -1,0 +1,17 @@
+name = "wake-up-sleeping-beauty"
+main = "src/index.js"
+compatibility_date = "2026-10-01"
+workers_dev = true
+
+[assets]
+directory = "./public"
+binding = "ASSETS"
+run_worker_first = ["/api/*"]
+
+[triggers]
+crons = ["* * * * *"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "wake-up-sleeping-beauty"
+database_id = "ecf27bbd-6ce1-44a3-b18d-571f8a674db8"

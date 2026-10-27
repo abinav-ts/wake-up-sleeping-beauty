@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Sleeping Beauty</title>
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/icon-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Wake Up">
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #fff; --fg: #000; --muted: #6e6e73; --line: #e3e3e6; --field: #f5f5f7; --danger: #d70015; --warn: #b25e00;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #000; --fg: #fff; --muted: #98989f; --line: #2a2a2e; --field: #111113; --danger: #ff453a; --warn: #ffb340; }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--fg); }
+  body { font: 16px/1.4 -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+         padding: max(12px, env(safe-area-inset-top)) 16px max(24px, env(safe-area-inset-bottom)); }
+  main { max-width: 480px; margin: 0 auto; display: grid; gap: 14px; }
+  .hero { display: grid; justify-items: center; gap: 14px; padding: 4px 0 6px; }
+  #chaos { width: 132px; height: auto; overflow: visible; }
+  #chaos path { fill: none; stroke: var(--fg); stroke-width: .55; stroke-linejoin: round; stroke-linecap: round; opacity: .9; }
+  #dial { width: min(78vw, 300px); height: auto; }
+  #dial .face { fill: none; stroke: var(--fg); stroke-width: 2.4; }
+  #dial .tick { stroke: var(--fg); stroke-width: 1; stroke-linecap: round; opacity: .55; }
+  #dial .tick.hr { stroke-width: 3; opacity: 1; }
+  #dial .hand { stroke: var(--fg); stroke-linecap: round; }
+  #dial #hHand { stroke-width: 5.5; } #dial #mHand { stroke-width: 3.6; } #dial #sHand { stroke-width: 1.3; }
+  #dial .hub { fill: var(--fg); }
+  #dial.ringing .face { stroke: var(--danger); animation: ringpulse .8s infinite; }
+  @keyframes ringpulse { 50% { stroke-width: 5; } }
+  .digital { margin: 0; font-size: 15px; color: var(--muted); font-variant-numeric: tabular-nums; letter-spacing: .02em; }
+  .card { background: var(--bg); border: 1px solid var(--line); border-radius: 18px; padding: 16px; }
+  .card h2 { margin: 0 0 10px; font-size: 12px; color: var(--muted); font-weight: 600; letter-spacing: .08em; text-transform: uppercase; }
+  button, input { font: inherit; color: inherit; }
+  button { border: 0; border-radius: 12px; padding: 12px 16px; background: var(--fg); color: var(--bg); font-weight: 600; cursor: pointer; }
+  button.ghost { background: transparent; color: var(--muted); border: 1px solid var(--line); }
+  button.small { padding: 6px 10px; font-size: 13px; }
+  button:disabled { opacity: .4; }
+  input { background: var(--field); border: 1px solid var(--line); border-radius: 12px; padding: 12px; width: 100%; }
+  .row { display: flex; gap: 10px; align-items: center; }
+  .row > * { flex: 1; }
+  .alarm { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-top: 1px solid var(--line); }
+  .alarm:first-of-type { border-top: 0; }
+  .alarm .t { font-size: 28px; font-weight: 300; font-variant-numeric: tabular-nums; }
+  .alarm .d { color: var(--muted); font-size: 13px; }
+  .alarm .grow { flex: 1; }
+  .chip { font-size: 12px; border-radius: 99px; padding: 3px 9px; border: 1px solid var(--line); color: var(--muted); }
+  .chip.ringing { background: var(--danger); border-color: var(--danger); color: #fff; }
+  .chip.snoozed { color: var(--warn); border-color: var(--warn); }
+  .ring { border-color: var(--danger); text-align: center; }
+  .ring h2 { color: var(--danger); }
+  .ring .big { font-size: 28px; font-weight: 600; margin: 4px 0 14px; }
+  .ring .row button { padding: 22px 10px; font-size: 20px; }
+  .ring .row button.stop { background: var(--danger); color: #fff; }
+  .ring .row button.snooze { background: transparent; color: var(--fg); border: 1.5px solid var(--fg); }
+  .bar { height: 6px; background: var(--field); border: 1px solid var(--line); border-radius: 99px; overflow: hidden; margin: 10px 0 6px; }
+  .bar > i { display: block; height: 100%; background: var(--fg); width: 0; transition: width .4s; }
+  .muted { color: var(--muted); font-size: 13px; }
+  .ok { font-weight: 500; }
+  .err { color: var(--danger); font-size: 14px; min-height: 1em; }
+  .hidden { display: none !important; }
+  code { background: var(--field); padding: 2px 6px; border-radius: 6px; font-size: 12px; word-break: break-all; }
+</style>
+</head>
+<body>
+<main>
+  <header class="hero">
+    <svg id="chaos" viewBox="0 0 120 90" role="img" aria-label="Chaos"><path d=""/></svg>
+    <svg id="dial" viewBox="-100 -100 200 200" role="img" aria-label="Analog clock">
+      <circle class="face" r="96"/>
+      <g id="ticks"></g>
+      <line class="hand" id="hHand" x1="0" y1="6" x2="0" y2="-52"/>
+      <line class="hand" id="mHand" x1="0" y1="8" x2="0" y2="-76"/>
+      <line class="hand" id="sHand" x1="0" y1="16" x2="0" y2="-86"/>
+      <circle class="hub" r="4.5"/>
+    </svg>
+    <p class="digital" id="digital"></p>
+  </header>
+
+  <section class="card hidden" id="login">
+    <h2>Unlock</h2>
+    <p class="muted">Paste your secret token (shown when you deployed). It's stored on this device only.</p>
+    <div class="row"><input id="tokenInput" type="password" placeholder="Token" autocomplete="off"><button id="tokenBtn" style="flex:0">Go</button></div>
+    <p class="err" id="loginErr"></p>
+  </section>
+
+  <section class="card ring hidden" id="ring">
+    <h2>Ringing</h2>
+    <div class="big">Wake up!</div>
+    <div class="row">
+      <button class="snooze" id="snoozeBtn">Snooze 5 min</button>
+      <button class="stop" id="stopBtn">Stop</button>
+    </div>
+  </section>
+
+  <div id="app" class="hidden" style="display:grid;gap:14px">
+    <section class="card">
+      <h2>Set an alarm</h2>
+      <div class="row"><input id="when" type="datetime-local"><button id="addBtn" style="flex:0;white-space:nowrap">Add</button></div>
+      <p class="err" id="addErr"></p>
+    </section>
+
+    <section class="card">
+      <h2>Alarms</h2>
+      <div id="alarms"><p class="muted">No alarms yet.</p></div>
+    </section>
+
+    <section class="card" id="stepsCard">
+      <h2>Grace period</h2>
+      <div id="stepsBody"><p class="muted">Starts the first time an alarm rings.</p></div>
+    </section>
+
+    <section class="card">
+      <h2>Notifications</h2>
+      <p class="muted" id="notifMsg"></p>
+      <div class="row">
+        <button id="notifBtn">Enable alarm notifications</button>
+        <button class="ghost" id="testBtn">Send test</button>
+      </div>
+      <p class="muted" style="margin-top:12px">Steps webhook for the Shortcut:<br><code id="hook"></code></p>
+    </section>
+  </div>
+</main>
+<script src="/app.js"></script>
+</body>
+</html>

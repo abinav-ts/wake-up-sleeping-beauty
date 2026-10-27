@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Viva Sheet: Wake Up, Sleeping Beauty</title>
+<style>
+:root{color-scheme:light dark;--bg:#fff;--fg:#111;--muted:#6e6e73;--line:#e3e3e6;--field:#f5f5f7}
+@media(prefers-color-scheme:dark){:root{--bg:#000;--fg:#f2f2f4;--muted:#98989f;--line:#2a2a2e;--field:#111113}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif}
+main{max-width:820px;margin:0 auto;padding:28px 18px 70px}
+h1{font-size:26px;margin:0 0 4px}h2{font-size:13px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:34px 0 10px;border-bottom:1px solid var(--line);padding-bottom:6px}
+.sub{color:var(--muted);margin:0}a{color:inherit}
+code{background:var(--field);padding:1px 5px;border-radius:5px;font:13px ui-monospace,Menlo,monospace}
+pre{background:var(--field);border:1px solid var(--line);border-radius:12px;padding:12px 14px;overflow:auto;font:13px/1.45 ui-monospace,Menlo,monospace}
+table{border-collapse:collapse;width:100%;font-size:14.5px}td,th{border:1px solid var(--line);padding:7px 10px;text-align:left;vertical-align:top}th{background:var(--field)}
+.card{border:1px solid var(--line);border-radius:14px;padding:12px 16px;margin:10px 0}
+details{border:1px solid var(--line);border-radius:12px;margin:8px 0}summary{cursor:pointer;padding:10px 14px;font-weight:600}details p{margin:0;padding:0 14px 12px}
+.eq{font:15px ui-monospace,Menlo,monospace;background:var(--field);border-radius:10px;padding:10px 14px;margin:8px 0;overflow:auto}
+ul{padding-left:20px}li{margin:.3em 0}.top{font-size:14px;margin-bottom:14px;display:block}
+</style></head><body><main>
+<a class="top" href="index.html">&larr; Home</a>
+<h1>Viva Sheet</h1>
+<p class="sub">Wake Up, Sleeping Beauty: an alarm clock that punishes oversleeping with unpredictable alarms.</p>
+
+<h2>The idea in one paragraph</h2>
+<p>You set alarms in the app. If you let one ring (or snooze it) for <b>x</b> minutes, then any alarm you set for 24 hours or more after that ring is moved by a <b>hidden random amount</b>, earlier or later, whose size grows with x. You can't see the real time. The only way out is to walk <b>10,000 steps</b> (read from Apple Health) before the shifted alarm fires.</p>
+
+<h2>Stack</h2>
+<table>
+<tr><th>Layer</th><th>Choice</th><th>Why</th></tr>
+<tr><td>Client</td><td>Installable PWA: plain HTML/CSS/JS, SVG analog clock, Lorenz-attractor "chaos crown"</td><td>Brief asked for a web deployment; no framework needed for a small UI; light/dark via <code>prefers-color-scheme</code></td></tr>
+<tr><td>Alarm delivery</td><td>Service Worker + Web Push (VAPID, ES256, empty payload)</td><td>A web page can't ring in the background; a server push can wake the phone. Empty payload avoids payload encryption</td></tr>
+<tr><td>Backend</td><td>Cloudflare Worker (JS)</td><td>Serverless, free tier, supports a <b>cron every minute</b></td></tr>
+<tr><td>Storage</td><td>Cloudflare D1 (SQLite)</td><td>Tiny relational state: alarms, chaos state, push subscriptions</td></tr>
+<tr><td>Health data</td><td>iOS Shortcuts automation, calling the Worker's <code>/api/steps</code></td><td>HealthKit has no web API, so a native Shortcut reads steps and pushes them to us</td></tr>
+<tr><td>Auth</td><td>One secret token (single user)</td><td>Simplest thing that keeps strangers out</td></tr>
+<tr><td>Tests</td><td><code>node:test</code>, with <code>node:sqlite</code> standing in for D1</td><td>Runs the real Worker code offline: 10 tests</td></tr>
+</table>
+
+<h2>Architecture</h2>
+<pre>iPhone PWA  ──(token)──►  Worker /api/*  ◄──►  D1 (alarms, chaos, subs)
+    ▲                          ▲   │
+    │ push notification        │   └── cron (every minute): start due alarms,
+    │                          │        send a push every ~30 s until Stop/Snooze
+Apple push service ◄───────────┘
+iOS Shortcut (Health steps) ──► POST /api/steps</pre>
+<p>The Worker is the only place the real fire time exists. <code>/api/state</code> never selects it, so the client cannot show or leak it (there is a test for that).</p>
+
+<h2>The chaos logic</h2>
+<div class="card">
+<b>1. Measure x.</b> When you stop an alarm, <code>x</code> = minutes rung (snoozes included) minus a <b>3-minute reaction grace</b>, never below 0. An alarm nobody answers auto-stops after 30 minutes, so x is capped at 27.
+<div class="eq">x = max(0, min(stop − ringStart, 30 min) − 3 min)</div>
+<b>2. Start the 24h clock.</b> <code>T1</code> = when that alarm started ringing. Alarms whose intended time is at or after <code>T1 + 24h</code> are "affected".
+<br><br><b>3. Draw the shift.</b> Normal, centred on zero, so earlier and later are equally likely, with spread proportional to x and no hard cap:
+<div class="eq">s ~ Normal(0, σ²),  σ = 15 min × x<br>fire = max(intended + s, now + 1 min)</div>
+Generated with Box–Muller from the browser-grade crypto RNG. The <code>now + 1 min</code> floor only stops a shifted alarm landing in the past.
+<br><br><b>4. Keep it hidden and fair.</b> The draw happens on the server: at creation for new alarms, or when an earlier alarm finishes (pending alarms are re-rolled with the new x). Several alarms get independent draws, but you can't see any of them.
+<br><br><b>5. Escape.</b> If steps since <code>T1</code> reach 10,000 before the shifted alarm fires, the shift is cancelled and the alarm rings at the intended time (immediately, if that time has already passed).
+<br><br><b>6. Chain.</b> Every alarm that rings replaces the chaos state (new T1, new x).
+</div>
+<p><b>Worked example.</b> Let an alarm ring 12 minutes: x = 12 − 3 = 9, σ = 135 min. Then P(moved by more than 30 min) ≈ 82%, more than 2 hours ≈ 37%, more than 6 hours ≈ 0.8%. A 1-minute reaction after the grace gives x = 0, so no shift at all.</p>
+
+<h2>Design decisions and trade-offs</h2>
+<ul>
+<li><b>We own the alarms.</b> iOS gives apps no access to the Clock app's alarms, so alarms are created in this app.</li>
+<li><b>Web, not native.</b> A project constraint. The cost: no HealthKit and no true alarm ringing, so we use Shortcuts and a push "nag loop".</li>
+<li><b>Normal distribution.</b> Symmetric, one parameter, unbounded tails (as requested), and easy to explain and test: mean 0, sd 15·x, checked statistically in a unit test.</li>
+<li><b>Empty-payload push.</b> The service worker shows a fixed "Wake up!" notification, so there is nothing to encrypt, which removes the most error-prone part of Web Push.</li>
+<li><b>Cron every minute.</b> Granularity is one minute, so an alarm may start up to 60 s late. A second push goes out 30 s after the first.</li>
+<li><b>D1 over KV.</b> Strongly consistent reads and writes for a read-modify-write workload.</li>
+</ul>
+
+<h2>Honest limitations</h2>
+<ul>
+<li>Push delivery on iOS can be delayed, and Silent mode or Focus will mute it. Keep a real backup alarm.</li>
+<li>Steps arrive when the Shortcut runs (e.g. every few hours), so a goal reached between runs may be noticed late. The number is sent by a Shortcut, so the check is honest-system, not tamper-proof.</li>
+<li>Setting a backup alarm earlier than T1 + 24h is unaffected by design.</li>
+<li>Single user, and the token lives in the URL for the steps webhook. Rotate it if it leaks.</li>
+<li>The deployed code was tested offline. Push on a real iPhone is the part exercised only in live use.</li>
+</ul>
+
+<h2>Likely viva questions</h2>
+<details><summary>Why can't the app just read the Clock app's alarms?</summary><p>iOS does not expose Clock alarms to third-party apps. There is no API to read, edit or observe them, so the app schedules and rings its own alarms.</p></details>
+<details><summary>Why use a Shortcut for steps instead of HealthKit directly?</summary><p>HealthKit is native-only (Swift/Objective-C). A web app cannot call it. Shortcuts can read Health data and make an HTTP request, which gives the server a step count without writing a native app.</p></details>
+<details><summary>How is the shifted time hidden from the user?</summary><p>It is computed and stored only in the Worker's database. The state API selects only the intended time and status, so the browser never receives the shifted time. A unit test asserts the response contains no fire time.</p></details>
+<details><summary>Why a Normal distribution with σ = 15·x?</summary><p>It treats earlier and later symmetrically, gives small shifts for small x, and has unbounded tails as the brief asked. Scaling σ linearly makes x a clean "dial" for how much chaos you earn.</p></details>
+<details><summary>What does the 3-minute grace do?</summary><p>It subtracts the first 3 minutes of ringing from x, so a normal human reaction time causes no shift. Only time beyond that counts.</p></details>
+<details><summary>What happens if I never respond to the alarm?</summary><p>After 30 minutes it auto-stops, x is capped at 27 (σ = 405 min), and a new 24h clock starts from when it began ringing.</p></details>
+<details><summary>How does the alarm ring if the app is closed?</summary><p>A Cloudflare cron runs every minute, starts any due alarm and sends Web Push notifications every ~30 seconds until you open the app and press Stop or Snooze.</p></details>
+<details><summary>What would you improve next?</summary><p>A native iOS app with AlarmKit and HealthKit would give true ringing and live steps; a signed Shortcut link for one-tap setup; and per-device auth instead of a shared token.</p></details>
+</main></body></html>
